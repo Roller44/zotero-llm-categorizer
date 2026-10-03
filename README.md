@@ -1,6 +1,6 @@
 # Zotero Smart Organizer
 
-[![GitHub release](https://img.shields.io/github/v/release/Roller44/zotero-smart-organizer?style=flat-square&logo=github)](https://github.com/Roller44/zotero-smart-organizer/releases)
+[![GitHub release](https://img.shields.io/github/v/release/Roller44/zotero-llm-categorizer?style=flat-square&logo=github)](https://github.com/Roller44/zotero-llm-categorizer/releases)
 [![Zotero 7+](https://img.shields.io/badge/Zotero-7%2B-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
@@ -20,7 +20,7 @@
 
 ## Installation
 
-1. Download the latest `.xpi` from [GitHub Releases](https://github.com/Roller44/zotero-smart-organizer/releases).
+1. Download the latest `.xpi` from [GitHub Releases](https://github.com/Roller44/zotero-llm-categorizer/releases).
 2. In Zotero, open **Tools → Add-ons**.
 3. Click the **gear icon** (top-right of the Add-ons Manager) and choose **Install Add-on From File…**.
 4. Select the downloaded `.xpi` and confirm the install.
