@@ -1,0 +1,182 @@
+/*
+ * Styles for the Smart Organizer review window (Gate 4).
+ *
+ * The window is a XUL <window> containing HTML elements (via the html:
+ * prefix). These rules target the HTML elements by class so they don't bleed
+ * into Zotero's chrome.
+ */
+
+.so-header {
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--fill-quinary, #ddd);
+  gap: 12px;
+}
+
+.so-header-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.so-stats {
+  color: var(--fill-secondary, #666);
+  font-size: 12px;
+}
+
+.so-main {
+  padding: 8px;
+  gap: 8px;
+}
+
+.so-tree-pane,
+.so-items-pane {
+  border: 1px solid var(--fill-quinary, #ddd);
+  border-radius: 4px;
+  padding: 6px;
+  overflow: auto;
+}
+
+.so-pane-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fill-secondary, #666);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.so-tree {
+  overflow: auto;
+  max-height: 520px;
+}
+
+.so-items {
+  overflow: auto;
+  max-height: 520px;
+}
+
+/* Taxonomy tree: nested <details>. */
+.so-node {
+  margin-left: 12px;
+}
+
+.so-node > summary {
+  cursor: pointer;
+  padding: 3px 4px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+}
+
+.so-node > summary::-webkit-details-marker {
+  display: none;
+}
+
+.so-node > summary::before {
+  content: "▶";
+  font-size: 10px;
+  color: var(--fill-secondary, #999);
+  transition: transform 0.1s;
+}
+
+.so-node[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.so-node > summary:hover {
+  background: var(--fill-quinary, #f0f0f0);
+}
+
+.so-node > summary.selected {
+  background: var(--accent-blue, #ccf);
+}
+
+.so-node-name {
+  font-weight: 500;
+}
+
+.so-node-count {
+  color: var(--fill-secondary, #999);
+  font-size: 11px;
+  background: var(--fill-quinary, #eee);
+  border-radius: 8px;
+  padding: 0 6px;
+}
+
+.so-node-desc {
+  color: var(--fill-secondary, #777);
+  font-size: 11px;
+  margin-left: 6px;
+}
+
+/* Item list. */
+.so-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--fill-quinary, #eee);
+}
+
+.so-item-title {
+  flex: 1;
+  font-size: 12px;
+}
+
+.so-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.so-badge-high {
+  background: var(--accent-green, #cfc);
+  color: var(--fill-primary, #060);
+}
+
+.so-badge-medium {
+  background: var(--accent-yellow, #fec);
+  color: var(--fill-primary, #660);
+}
+
+.so-badge-low {
+  background: var(--accent-red, #fcc);
+  color: var(--fill-primary, #600);
+}
+
+.so-empty {
+  color: var(--fill-secondary, #999);
+  font-style: italic;
+  padding: 12px;
+}
+
+/* Footer controls. */
+.so-controls {
+  padding: 8px 12px;
+  border-top: 1px solid var(--fill-quinary, #ddd);
+  gap: 8px;
+  align-items: center;
+}
+
+.so-status {
+  padding: 4px 12px 8px;
+  font-size: 12px;
+  color: var(--fill-secondary, #666);
+  min-height: 18px;
+}
+
+.so-status.error {
+  color: var(--accent-red, #c00);
+}
+
+.so-status.success {
+  color: var(--accent-green, #060);
+}
+
+.so-status.busy {
+  color: var(--accent-blue, #06c);
+}

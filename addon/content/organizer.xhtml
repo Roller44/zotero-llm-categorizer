@@ -1,0 +1,72 @@
+<?xml version="1.0"?>
+<?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
+<?xml-stylesheet href="organizer.css" type="text/css"?>
+
+<window
+  xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+  xmlns:html="http://www.w3.org/1999/xhtml"
+  title="Smart Organizer — Review Plan"
+  width="900"
+  height="640"
+  persist="screenX screenY width height"
+>
+  <linkset>
+    <html:link rel="localization" href="smartorganizer-mainWindow.ftl" />
+  </linkset>
+
+  <vbox flex="1" id="smartorganizer-root" style="padding: 0; margin: 0;">
+    <!-- Header -->
+    <hbox id="smartorganizer-header" style="padding: 8px 12px; border-bottom: 1px solid #ddd;">
+      <label value="Smart Organizer — Review Plan" style="font-size: 16px; font-weight: bold;" />
+      <html:div id="smartorganizer-stats" style="color: #666; font-size: 12px; margin-left: 12px;"></html:div>
+    </hbox>
+
+    <!-- Generating overlay: visible by default -->
+    <vbox id="smartorganizer-generating" flex="1" style="padding: 16px;">
+      <label value="Generating categorization plan…" style="font-size: 16px; font-weight: bold;" />
+      <spacer style="height: 8px;" />
+      <description id="smartorganizer-gen-message" style="font-size: 13px;">Starting…</description>
+      <spacer style="height: 8px;" />
+      <progressmeter id="smartorganizer-gen-bar" mode="determined" value="0" />
+      <spacer style="height: 8px;" />
+      <label value="LLM activity log:" style="font-size: 11px; font-weight: bold;" />
+      <spacer style="height: 4px;" />
+      <hbox style="height: 150px;">
+        <html:textarea id="smartorganizer-gen-log" wrap="soft" style="font-family: monospace; font-size: 11px; width: 100%; height: 100%; box-sizing: border-box; resize: none; border: 1px solid #ccc; padding: 4px; white-space: pre-wrap;"></html:textarea>
+      </hbox>
+      <label value="LLM reasoning:" style="font-size: 11px; font-weight: bold; margin-top: 8px;" />
+      <hbox style="height: 120px;">
+        <html:textarea id="smartorganizer-gen-reasoning" wrap="soft" style="font-family: monospace; font-size: 11px; width: 100%; height: 100%; box-sizing: border-box; resize: none; border: 1px solid #ddd; padding: 4px; color: #888; white-space: pre-wrap;"></html:textarea>
+      </hbox>
+    </vbox>
+
+    <!-- Main split: hidden until plan is ready.
+         Uses an explicit pixel height instead of flex so the content area
+         has a real height regardless of XUL/CSS flex interactions. -->
+    <html:div id="smartorganizer-main" style="display: none; padding: 8px; box-sizing: border-box; height: 400px; overflow: hidden;">
+      <html:div style="display: flex; flex-direction: row; gap: 8px; height: 100%; box-sizing: border-box;">
+        <html:div style="flex: 2; border: 1px solid #ddd; padding: 6px; box-sizing: border-box; display: flex; flex-direction: column; min-width: 0; height: 100%;">
+          <html:div style="font-size: 12px; font-weight: bold; color: #666; padding-bottom: 4px; flex-shrink: 0;">Proposed Taxonomy</html:div>
+          <html:div id="smartorganizer-tree" style="flex: 1; overflow: auto; min-height: 0; border: 1px solid #eee;" />
+        </html:div>
+        <html:div style="flex: 3; border: 1px solid #ddd; padding: 6px; box-sizing: border-box; display: flex; flex-direction: column; min-width: 0; height: 100%;">
+          <html:div style="font-size: 12px; font-weight: bold; color: #666; padding-bottom: 4px; flex-shrink: 0;">Items in Selected Collection</html:div>
+          <html:div id="smartorganizer-items" style="flex: 1; overflow: auto; min-height: 0; border: 1px solid #eee;" />
+        </html:div>
+      </html:div>
+    </html:div>
+
+    <!-- Footer -->
+    <vbox style="padding: 8px 12px; border-top: 1px solid #ddd;">
+      <hbox>
+        <spacer flex="1" />
+        <button id="smartorganizer-regenerate" label="Regenerate Plan" />
+        <button id="smartorganizer-apply" label="Apply Plan" />
+        <button id="smartorganizer-revert" label="Revert" disabled="true" />
+        <button id="smartorganizer-cancel" label="Cancel" />
+      </hbox>
+      <description style="font-size: 11px; color: #999; padding-top: 4px;">Applying will replace all existing collection memberships with the proposed taxonomy. Old collections that become empty will be deleted. You can revert to restore the previous state.</description>
+    </vbox>
+    <description id="smartorganizer-status" style="padding: 4px 12px 8px; font-size: 12px; color: #666;" />
+  </vbox>
+</window>

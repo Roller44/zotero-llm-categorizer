@@ -1,0 +1,165 @@
+<linkset>
+  <html:link rel="localization" href="__addonRef__-preferences.ftl" />
+</linkset>
+<groupbox
+  onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
+>
+  <label><html:h2 data-l10n-id="pref-title"></html:h2></label>
+
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-endpoint"
+      data-l10n-id="pref-endpoint"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-endpoint"
+      preference="endpoint"
+      flex="1"
+    ></html:input>
+  </hbox>
+
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-apiKey"
+      data-l10n-id="pref-apikey"
+    ></html:label>
+    <html:input
+      type="password"
+      id="zotero-prefpane-__addonRef__-apiKey"
+      preference="apiKey"
+      flex="1"
+    ></html:input>
+  </hbox>
+
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-model"
+      data-l10n-id="pref-model"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-model"
+      preference="model"
+      flex="1"
+    ></html:input>
+  </hbox>
+
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-provider"
+      data-l10n-id="pref-provider"
+    ></html:label>
+    <menulist
+      id="zotero-prefpane-__addonRef__-provider"
+      preference="provider"
+    >
+      <menupopup>
+        <menuitem
+          value="openai"
+          data-l10n-id="pref-provider-openai"
+        ></menuitem>
+        <menuitem
+          value="anthropic"
+          data-l10n-id="pref-provider-anthropic"
+        ></menuitem>
+      </menupopup>
+    </menulist>
+  </hbox>
+
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-maxTokens"
+      data-l10n-id="pref-max-tokens"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-maxTokens"
+      preference="maxTokens"
+      flex="1"
+    ></html:input>
+  </hbox>
+
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-timeoutSeconds"
+      data-l10n-id="pref-timeout"
+    ></html:label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-timeoutSeconds"
+      preference="timeoutSeconds"
+      flex="1"
+    ></html:input>
+  </hbox>
+
+  <hbox>
+    <html:label
+      for="zotero-prefpane-__addonRef__-reasoningEffort"
+      data-l10n-id="pref-reasoning-effort"
+    ></html:label>
+    <menulist
+      id="zotero-prefpane-__addonRef__-reasoningEffort"
+      preference="reasoningEffort"
+    >
+      <menupopup>
+        <menuitem
+          value="none"
+          data-l10n-id="pref-reasoning-effort-none"
+        ></menuitem>
+        <menuitem
+          value="low"
+          data-l10n-id="pref-reasoning-effort-low"
+        ></menuitem>
+        <menuitem
+          value="medium"
+          data-l10n-id="pref-reasoning-effort-medium"
+        ></menuitem>
+        <menuitem
+          value="high"
+          data-l10n-id="pref-reasoning-effort-high"
+        ></menuitem>
+      </menupopup>
+    </menulist>
+  </hbox>
+
+  <hbox>
+    <label value="Taxonomy System Prompt (leave empty for default)" style="font-size: 12px; font-weight: bold; margin-bottom: 4px;" />
+  </hbox>
+  <hbox style="margin-bottom: 8px; min-height: 140px;" pack="stretch">
+    <html:textarea
+      id="zotero-prefpane-__addonRef__-taxonomySystemPrompt"
+      preference="taxonomySystemPrompt"
+      style="font-family: monospace; font-size: 11px; width: 100%; height: 140px; box-sizing: border-box; resize: none;"
+    ></html:textarea>
+  </hbox>
+
+  <hbox>
+    <label value="Classification System Prompt (leave empty for default)" style="font-size: 12px; font-weight: bold; margin-bottom: 4px; margin-top: 8px;" />
+  </hbox>
+  <hbox style="margin-bottom: 8px; min-height: 140px;" pack="stretch">
+    <html:textarea
+      id="zotero-prefpane-__addonRef__-classificationSystemPrompt"
+      preference="classificationSystemPrompt"
+      style="font-family: monospace; font-size: 11px; width: 100%; height: 140px; box-sizing: border-box; resize: none;"
+    ></html:textarea>
+  </hbox>
+
+  <hbox>
+    <html:button
+      id="zotero-prefpane-__addonRef__-test-btn"
+      type="button"
+      data-l10n-id="pref-test-button"
+    ></html:button>
+    <html:span
+      id="zotero-prefpane-__addonRef__-test-result"
+      style="margin-left: 8px; align-self: center;"
+    ></html:span>
+  </hbox>
+</groupbox>
+<vbox>
+  <html:label
+    data-l10n-id="pref-help"
+    data-l10n-args='{"time": "__buildTime__","name": "__addonName__","version":"__buildVersion__"}'
+  ></html:label>
+</vbox>

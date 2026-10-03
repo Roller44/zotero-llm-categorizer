@@ -1,0 +1,28 @@
+# dot files
+.DS_Store
+
+# Node.js
+node_modules/
+node_modules
+pnpm-lock.yaml
+yarn.lock
+
+# TSC
+tsconfig.tsbuildinfo
+
+# Scaffold
+.env
+.scaffold/
+.scaffold
+build
+logs
+
+# Logs
+*.log
+
+# ZCode agent handoff files
+.agents/
+.agents
+
+# ZCode workflow files
+.zcode/nul
