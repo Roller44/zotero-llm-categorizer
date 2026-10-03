@@ -227,7 +227,11 @@ export function validateTaxonomy(json: unknown): ValidationResult<TaxonomyNode[]
     if (!res.ok) {
       return { ok: false, error: `root[${i}]: ${res.error}` };
     }
-    // Walk the subtree collecting/deduping paths.
+    // Walk the subtree deduping by path. Two nodes may share a leaf name
+    // (e.g. "Wireless/MACProtocols" and "Wired/MACProtocols") — those are
+    // legitimate distinct collections with different parents, so we do NOT
+    // reject on duplicate names. Duplicate PATHS (same name at the same
+    // position) are still rejected because they'd collapse into one collection.
     const stack: TaxonomyNode[] = [res.value];
     while (stack.length > 0) {
       const n = stack.pop()!;
@@ -360,6 +364,73 @@ export function flattenTaxonomyPaths(taxonomy: TaxonomyNode[]): string[] {
     out.push(n.path);
     for (let i = n.children.length - 1; i >= 0; i--) {
       stack.push(n.children[i]);
+    }
+  }
+  return out;
+}
+
+/**
+ * Return the leaf-name component of a slash-delimited collection path (the
+ * substring after the last '/'). A path with no '/' returns itself. Pure.
+ */
+function leafNameOf(path: string): string {
+  const i = path.lastIndexOf("/");
+  return i === -1 ? path : path.slice(i + 1);
+}
+
+/**
+ * Detect leaf-name collisions between a proposed taxonomy and the EXISTING
+ * library's collection paths — the root cause of the duplicate-collection-name
+ * bug.
+ *
+ * A collision is a taxonomy node that the applier would have to CREATE (its
+ * full path is NOT in `existingPaths`, so `pathToID.get(node.path)` would be
+ * undefined) AND whose LEAF name matches an existing collection's leaf name.
+ * In `planApplier.applyPlan` such a node would silently create a brand-new
+ * same-named collection under a different parent, leaving the library with two
+ * distinct collections that share a name but hold different papers.
+ *
+ * A taxonomy node whose full path EXACTLY matches an existing path is a REUSE
+ * (the applier will reuse the existing collection) and is never reported,
+ * even if some other existing collection shares its leaf name — that
+ * pre-existing duplicate is not something this apply would create.
+ *
+ * Pure: no Zotero globals, no I/O. Exported so `planApplier` can call it from
+ * the live-Zotero path (pre-apply guard) and so it is unit-tested under plain
+ * Node. Returns the list of collisions (empty if none). Each entry names the
+ * offending taxonomy path, its leaf name, and the conflicting existing path.
+ */
+export function findExistingNameCollisions(
+  taxonomy: TaxonomyNode[],
+  existingPaths: string[],
+): { taxPath: string; taxLeafName: string; existingPath: string }[] {
+  const existingSet = new Set(existingPaths);
+  const existingByLeaf = new Map<string, string[]>();
+  for (const p of existingPaths) {
+    const leaf = leafNameOf(p);
+    let arr = existingByLeaf.get(leaf);
+    if (!arr) {
+      arr = [];
+      existingByLeaf.set(leaf, arr);
+    }
+    arr.push(p);
+  }
+  const out: { taxPath: string; taxLeafName: string; existingPath: string }[] =
+    [];
+  for (const taxPath of flattenTaxonomyPaths(taxonomy)) {
+    // Reuse: the applier will reuse the existing collection at this exact path,
+    // so no new same-named collection would be created. Skip.
+    if (existingSet.has(taxPath)) {
+      continue;
+    }
+    const leaf = leafNameOf(taxPath);
+    const candidates = existingByLeaf.get(leaf);
+    if (!candidates) {
+      continue;
+    }
+    // taxPath is not in existingSet, so every candidate path differs from it.
+    for (const existingPath of candidates) {
+      out.push({ taxPath, taxLeafName: leaf, existingPath });
     }
   }
   return out;

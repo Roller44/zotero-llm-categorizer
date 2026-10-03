@@ -8,9 +8,14 @@
  *  - anthropic: POST {model, messages, max_tokens} with `x-api-key` and
  *    `anthropic-version` headers to the configured endpoint (full /v1/messages URL).
  *
- * All network access goes through `Zotero.HTTP.request`, which is available
- * inside the plugin sandbox (verified against Zotero 9 source — see
- * references/zotero-js-api.md). No item/library reads or writes happen here.
+ * Network access goes through `fetch()` (resolved via
+ * `Zotero.getMainWindow()?.fetch ?? globalThis.fetch`), NOT
+ * `Zotero.HTTP.request`. fetch() is used because many LLM endpoints (especially
+ * reasoning models like Kimi-K3) hold the connection open without sending data
+ * while "thinking"; Zotero.HTTP.request (XHR-based, non-streaming) interprets
+ * that silence as a timeout, while fetch() with streaming keeps the connection
+ * alive and reads the response as it arrives. No item/library reads or writes
+ * happen here.
  *
  * The pure request/response logic lives in `llmRequest.ts` (no Zotero/config
  * deps) so it can be unit-tested under plain Node.
@@ -122,6 +127,10 @@ export async function chatComplete(
 ): Promise<string> {
   const settings = getSettings();
   const prepared = buildRequestPure(messages, settings, options);
+  Zotero.debug(
+    `[SmartOrganizer] chatComplete: entry — provider=${prepared.provider}, model=${settings.model}, ` +
+      `${messages.length} messages`,
+  );
 
   // Use the global fetch() from the Zotero/Firefox environment.
   const fetchFn =
@@ -139,6 +148,9 @@ export async function chatComplete(
       body: prepared.body,
     });
   } catch (e: any) {
+    Zotero.debug(
+      `[SmartOrganizer] chatComplete: network error — ${e?.message ?? String(e)}`.slice(0, 500),
+    );
     throw new Error(
       `LLM request failed (network error): ${e?.message ?? String(e)}`.slice(0, 1000),
     );
@@ -146,6 +158,9 @@ export async function chatComplete(
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
+    Zotero.debug(
+      `[SmartOrganizer] chatComplete: HTTP ${response.status} — ${errorText.slice(0, 300)}`,
+    );
     throw new Error(
       `LLM endpoint returned HTTP ${response.status}: ${errorText.slice(0, 500)}`,
     );
@@ -158,6 +173,9 @@ export async function chatComplete(
     contentType.includes("octet-stream");
 
   if (isStreaming && response.body) {
+    Zotero.debug(
+      `[SmartOrganizer] chatComplete: reading SSE stream (content-type=${contentType})`,
+    );
     // Read the SSE stream — readSSEStream returns the accumulated
     // assistant message content directly (not wrapped in an API response).
     const content = await readSSEStream(
@@ -166,14 +184,22 @@ export async function chatComplete(
       onChunk,
     );
     if (!content || content.trim().length === 0) {
+      Zotero.debug("[SmartOrganizer] chatComplete: streaming response was empty");
       throw new Error("LLM streaming response was empty.");
     }
+    Zotero.debug(
+      `[SmartOrganizer] chatComplete: exit — streaming OK, ${content.length} content chars`,
+    );
     return content;
   }
 
   // Non-streaming: read the full response as text and parse the API wrapper.
   const responseText = await response.text();
-  return parseResponse(prepared.provider, responseText);
+  const parsed = parseResponse(prepared.provider, responseText);
+  Zotero.debug(
+    `[SmartOrganizer] chatComplete: exit — non-streaming OK, ${parsed.length} content chars`,
+  );
+  return parsed;
 }
 
 /**
@@ -185,6 +211,9 @@ async function readSSEStream(
   provider: "openai" | "anthropic",
   onChunk?: ChunkCallback,
 ): Promise<string> {
+  Zotero.debug(
+    `[SmartOrganizer] readSSEStream: entry — provider=${provider}`,
+  );
   const reader = body.getReader() as any;
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
@@ -192,11 +221,22 @@ async function readSSEStream(
   let chunkCount = 0;
   let reasoningChars = 0;
   let reasoningAccumulated = "";
+  let lastYield = Date.now();
 
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+
+      // Yield to the UI macrotask queue so the host can paint and process
+      // input between chunks. A setTimeout(0) macrotask is required — a
+      // microtask (Promise.resolve) would not give the paint/input queue a
+      // turn and the Zotero window would still freeze on fast streams.
+      // Throttled to ~16ms (one frame) so fast streams aren't slowed.
+      if (Date.now() - lastYield > 16) {
+        await new Promise<void>((r) => setTimeout(r, 0));
+        lastYield = Date.now();
+      }
 
       buffer += decoder.decode(value, { stream: true });
 

@@ -160,7 +160,7 @@ async function startGenerating(win: Window): Promise<void> {
         renderPlan(win);
       }
     }
-  }, 500);
+    }, 150);
 
   Zotero.debug("[SmartOrganizer] ===== Starting plan generation =====");
 
@@ -170,18 +170,12 @@ async function startGenerating(win: Window): Promise<void> {
       Zotero.debug(`[SmartOrganizer] PROGRESS: ${update.message}`);
       const ts = new Date().toLocaleTimeString();
       if (update.stage === "reasoning") {
-        // Reasoning chunks: append directly and update the textbox immediately.
+        // Reasoning chunks: append to the in-memory buffer only.
+        // The setInterval flush below is the SOLE path that touches the DOM,
+        // so per-chunk DOM writes don't starve the main thread.
         reasoningText += update.detail || update.message;
-        if (reasoningEl) {
-          reasoningEl.value = reasoningText;
-          try { reasoningEl.scrollTop = reasoningEl.scrollHeight; } catch {}
-        }
-        // Debug: log first reasoning update to confirm it reaches here
-        if (reasoningText.length < 200) {
-          Zotero.debug(`[SmartOrganizer] REASONING UI UPDATE: el=${!!reasoningEl}, textLen=${reasoningText.length}, text=${reasoningText.slice(0, 100)}`);
-        }
       } else {
-        // Progress/status: add timestamped line to the log.
+        // Progress/status: add timestamped line to the in-memory log buffer.
         logText += `[${ts}] ${update.message}\n`;
         if (update.detail) {
           for (const line of update.detail.split("\n")) {
@@ -189,20 +183,11 @@ async function startGenerating(win: Window): Promise<void> {
             Zotero.debug(`[SmartOrganizer] ${line}`);
           }
         }
-        // Update the log textbox immediately.
-        if (logEl) {
-          logEl.value = logText;
-          try { logEl.scrollTop = logEl.scrollHeight; } catch {}
-        }
       }
-      // Update status message + progress bar immediately.
+      // Track latest status for the timer-driven flush; do NOT touch the DOM here.
       lastMessage = update.message;
-      const msgEl = doc.getElementById("smartorganizer-gen-message") as any;
-      if (msgEl) msgEl.setAttribute("value", update.message);
       if (typeof update.current === "number" && typeof update.total === "number" && update.total > 0) {
         lastProgress = Math.round((update.current / update.total) * 100);
-        const barEl = doc.getElementById("smartorganizer-gen-bar") as any;
-        if (barEl) barEl.setAttribute("value", String(lastProgress));
       }
     });
   } catch (e) {
@@ -253,6 +238,53 @@ function showGenerating(doc: Document, generating: boolean): void {
   // (Previously "-moz-box" was used when it was a XUL hbox — that no longer
   // applies since the panel is HTML.)
   if (mainPanel) mainPanel.style.display = generating ? "none" : "block";
+}
+
+/**
+ * Toggle the applying overlay. When shown, the plan view is hidden so the
+ * user sees only the progress bar and status message. This prevents the user
+ * from thinking the program is frozen during the (potentially long) apply
+ * phase.
+ */
+function showApplying(win: Window, applying: boolean): void {
+  const doc = win.document;
+  const applyPanel = doc.getElementById("smartorganizer-applying") as any;
+  const mainPanel = doc.getElementById("smartorganizer-main") as any;
+  if (applyPanel) applyPanel.style.display = applying ? "" : "none";
+  if (mainPanel) mainPanel.style.display = applying ? "none" : "block";
+}
+
+/**
+ * Update the apply progress overlay: status message, progress bar value, and
+ * optional detail text. Called by the timer in `onApply`.
+ */
+function setApplyProgress(
+  win: Window,
+  message: string,
+  percent: number,
+  detail: string,
+): void {
+  const doc = win.document;
+  const msgEl = doc.getElementById("smartorganizer-apply-message") as any;
+  if (msgEl) msgEl.setAttribute("value", message);
+  const barEl = doc.getElementById("smartorganizer-apply-bar") as any;
+  if (barEl) barEl.setAttribute("value", String(percent));
+  const detailEl = doc.getElementById("smartorganizer-apply-detail") as any;
+  if (detailEl) detailEl.setAttribute("value", detail);
+}
+
+/**
+ * Enable or disable the action buttons (Apply, Regenerate) to prevent
+ * re-entrancy during an apply. Cancel is left enabled so the user can close
+ * the window. Revert's state is managed separately (disabled unless a
+ * snapshot exists).
+ */
+function setButtonsDisabled(win: Window, disabled: boolean): void {
+  const doc = win.document;
+  const applyBtn = doc.getElementById("smartorganizer-apply") as any;
+  if (applyBtn) applyBtn.disabled = disabled;
+  const regenBtn = doc.getElementById("smartorganizer-regenerate") as any;
+  if (regenBtn) regenBtn.disabled = disabled;
 }
 
 /**
@@ -490,21 +522,26 @@ function flattenNodes(roots: TaxonomyNode[]): TaxonomyNode[] {
 
 /**
  * Apply the plan: capture a snapshot FIRST (before any write), then call
- * `applyPlan`. Shows progress and the `ApplyResult`. Enables the Revert
- * button on success.
+ * `applyPlan`. Shows a progress overlay with a live progress bar and status
+ * message so the user can see the apply is running and isn't frozen. Enables
+ * the Revert button on success.
  */
 async function onApply(win: Window): Promise<void> {
+  Zotero.debug("[SmartOrganizer] onApply: entry");
   const plan = state.plan;
   if (!plan) {
+    Zotero.debug("[SmartOrganizer] onApply: no plan; aborting");
     setStatus(win, "No plan to apply.", "error");
     return;
   }
 
   // SAFETY: capture snapshot BEFORE any write.
   setStatus(win, "Capturing pre-apply snapshot…", "busy");
+  Zotero.debug("[SmartOrganizer] onApply: capturing pre-apply snapshot");
   try {
     state.snapshot = await captureSnapshot();
   } catch (e) {
+    Zotero.debug(`[SmartOrganizer] onApply: snapshot FAILED: ${e}`);
     setStatus(
       win,
       `Snapshot failed: ${(e as Error).message ?? String(e)}`,
@@ -512,18 +549,58 @@ async function onApply(win: Window): Promise<void> {
     );
     return;
   }
+  Zotero.debug("[SmartOrganizer] onApply: snapshot captured");
 
-  setStatus(
-    win,
-    `Applying plan (${plan.assignments.length} items, ` +
-      `${plan.stats.totalCollections} collections)…`,
-    "busy",
-  );
+  // Show the applying overlay with a progress bar.
+  showApplying(win, true);
+  setApplyProgress(win, "Starting apply…", 0, "");
+
+  // Disable the action buttons during apply to prevent re-entrancy.
+  setButtonsDisabled(win, true);
+
+  // Accumulate progress in plain variables; a timer flushes to the DOM every
+  // 150ms so the UI updates without starving the async apply loop.
+  let applyMsg = "Starting apply…";
+  let applyPct = 0;
+  let applyDetail = "";
+
+  const timer = win.setInterval(() => {
+    setApplyProgress(win, applyMsg, applyPct, applyDetail);
+  }, 150);
 
   let result: ApplyResult;
   try {
-    result = await applyPlan(plan, { replaceExisting: true });
+    Zotero.debug(
+      `[SmartOrganizer] onApply: calling applyPlan (replaceExisting=true)`,
+    );
+    result = await applyPlan(plan, {
+      replaceExisting: true,
+      onProgress: (u) => {
+        // Map the three phases to overall progress: collections 0-10%,
+        // refiling 10-95%, cleanup 95-100%.
+        if (u.phase === "collections") {
+          applyPct = Math.round((u.current / Math.max(u.total, 1)) * 10);
+          applyMsg = u.message;
+        } else if (u.phase === "refiling") {
+          applyPct = 10 + Math.round((u.current / Math.max(u.total, 1)) * 85);
+          applyMsg = u.message;
+        } else {
+          applyPct = 95;
+          applyMsg = u.message;
+        }
+        applyDetail = "";
+      },
+    });
+    Zotero.debug(
+      `[SmartOrganizer] onApply: applyPlan returned — ${result.collectionsCreated} created, ` +
+        `${result.itemsRefiled} refiled, ${result.collectionsDeleted} deleted, ` +
+        `${result.errors.length} errors, ${result.nameCollisions.length} collisions`,
+    );
   } catch (e) {
+    win.clearInterval(timer);
+    showApplying(win, false);
+    setButtonsDisabled(win, false);
+    Zotero.debug(`[SmartOrganizer] onApply: applyPlan threw: ${e}`);
     setStatus(
       win,
       `Apply failed: ${(e as Error).message ?? String(e)}`,
@@ -532,6 +609,12 @@ async function onApply(win: Window): Promise<void> {
     return;
   }
   state.lastApply = result;
+
+  // Final flush, then hide the overlay.
+  win.clearInterval(timer);
+  setApplyProgress(win, "Apply complete!", 100, "");
+  showApplying(win, false);
+  setButtonsDisabled(win, false);
 
   const errLine =
     result.errors.length > 0
@@ -557,7 +640,9 @@ async function onApply(win: Window): Promise<void> {
  * Revert: confirm with the user, then restore from the captured snapshot.
  */
 async function onRevert(win: Window): Promise<void> {
+  Zotero.debug("[SmartOrganizer] onRevert: entry");
   if (!state.snapshot) {
+    Zotero.debug("[SmartOrganizer] onRevert: no snapshot; aborting");
     setStatus(win, "No snapshot to revert from.", "error");
     return;
   }

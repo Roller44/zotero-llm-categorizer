@@ -22,6 +22,7 @@ import {
 import {
   extractJson,
   flattenTaxonomyPaths,
+  findExistingNameCollisions,
   validateAssignments,
   validateTaxonomy,
 } from "../src/modules/planValidator.ts";
@@ -131,7 +132,7 @@ test("buildRetryPrompt: includes the error message and forbids prose", () => {
   assert.ok(system.includes("could not be parsed"));
   assert.ok(system.replace(/\s+/g, " ").includes("no markdown fences"));
   assert.ok(user.includes("missing field 'path'"));
-  assert.ok(user.includes("JSON and nothing else"));
+  assert.ok(user.includes("ONLY the JSON"));
 });
 
 test("serializeItemForPrompt: no abstract when budget is 0", () => {
@@ -257,14 +258,14 @@ test("validateTaxonomy: rejects duplicate paths", () => {
       description: "",
       children: [
         {
-          name: "A",
-          path: "A/A",
+          name: "B",
+          path: "A/B",
           description: "",
           children: [],
         },
         {
-          name: "A",
-          path: "A/A",
+          name: "B",
+          path: "A/B",
           description: "",
           children: [],
         },
@@ -274,6 +275,7 @@ test("validateTaxonomy: rejects duplicate paths", () => {
   const res = validateTaxonomy(bad);
   assert.equal(res.ok, false);
   if (!res.ok) {
+    // Rejected because both children produce the same path "A/B".
     assert.match(res.error, /duplicate taxonomy path/);
   }
 });
@@ -288,19 +290,34 @@ test("validateTaxonomy: rejects empty taxonomy", () => {
   assert.equal(res.ok, false);
 });
 
-test("validateTaxonomy: rejects cycle-free but self-referential path via child echoing ancestor name is allowed", () => {
-  // A child may legitimately share an ancestor's name (e.g. a sub-area named
-  // like the parent). This is NOT a cycle and must be accepted as long as
-  // paths differ.
+test("validateTaxonomy: accepts duplicate leaf names with different paths", () => {
+  // Two collections may share a leaf name if they have different parents
+  // (e.g. "Wireless/MACProtocols" and "Wired/MACProtocols"). These are
+  // legitimate distinct collections and must NOT be rejected — rejecting
+  // them causes the LLM retry cascade to fail (the LLM loses context and
+  // produces garbage on retry).
   const ok = [
     {
-      name: "ML",
-      path: "ML",
+      name: "Wireless",
+      path: "Wireless",
       description: "",
       children: [
         {
-          name: "ML",
-          path: "ML/ML",
+          name: "MACProtocols",
+          path: "Wireless/MACProtocols",
+          description: "",
+          children: [],
+        },
+      ],
+    },
+    {
+      name: "Wired",
+      path: "Wired",
+      description: "",
+      children: [
+        {
+          name: "MACProtocols",
+          path: "Wired/MACProtocols",
           description: "",
           children: [],
         },
@@ -309,6 +326,9 @@ test("validateTaxonomy: rejects cycle-free but self-referential path via child e
   ];
   const res = validateTaxonomy(ok);
   assert.equal(res.ok, true);
+  if (res.ok) {
+    assert.equal(res.value.length, 2);
+  }
 });
 
 // --- validateAssignments --------------------------------------------------
@@ -454,6 +474,85 @@ test("flattenTaxonomyPaths: single root -> [path]", () => {
     { name: "Solo", path: "Solo", description: "", children: [] },
   ];
   assert.deepEqual(flattenTaxonomyPaths(t), ["Solo"]);
+});
+
+// --- findExistingNameCollisions -------------------------------------------
+
+test("findExistingNameCollisions: detects leaf-name collision at a different path", () => {
+  // Existing library has a top-level "Theory" collection. The LLM taxonomy
+  // proposes "SemanticComm/Theory". The applier would create a brand-new
+  // "Theory" under "SemanticComm" — the duplicate-name bug.
+  const tax: TaxonomyNode[] = [
+    {
+      name: "SemanticComm",
+      path: "SemanticComm",
+      description: "",
+      children: [
+        { name: "Theory", path: "SemanticComm/Theory", description: "", children: [] },
+      ],
+    },
+  ];
+  const existing = ["Theory", "SemanticComm"];
+  const cols = findExistingNameCollisions(tax, existing);
+  assert.equal(cols.length, 1);
+  assert.equal(cols[0].taxPath, "SemanticComm/Theory");
+  assert.equal(cols[0].taxLeafName, "Theory");
+  assert.equal(cols[0].existingPath, "Theory");
+});
+
+test("findExistingNameCollisions: reuse at exact path is NOT a collision", () => {
+  // The taxonomy node's full path exactly matches an existing path — the
+  // applier will reuse the existing collection, not create a new one.
+  const tax: TaxonomyNode[] = [
+    { name: "Theory", path: "Theory", description: "", children: [] },
+  ];
+  const existing = ["Theory"];
+  assert.deepEqual(findExistingNameCollisions(tax, existing), []);
+});
+
+test("findExistingNameCollisions: no collision when leaf name is unique", () => {
+  const tax: TaxonomyNode[] = [
+    { name: "ChannelCoding", path: "ChannelCoding", description: "", children: [] },
+  ];
+  const existing = ["Theory", "SemanticComm"];
+  assert.deepEqual(findExistingNameCollisions(tax, existing), []);
+});
+
+test("findExistingNameCollisions: empty existing paths -> no collisions", () => {
+  const tax: TaxonomyNode[] = [
+    { name: "Theory", path: "Theory", description: "", children: [] },
+  ];
+  assert.deepEqual(findExistingNameCollisions(tax, []), []);
+});
+
+test("findExistingNameCollisions: empty taxonomy -> no collisions", () => {
+  assert.deepEqual(findExistingNameCollisions([], ["Theory"]), []);
+});
+
+test("findExistingNameCollisions: reports all conflicting existing paths for one leaf", () => {
+  // Two existing collections share the leaf name "Theory" (under different
+  // parents); the taxonomy proposes a third "Theory" at a new path. All
+  // conflicting existing paths are reported.
+  const tax: TaxonomyNode[] = [
+    { name: "Theory", path: "NewArea/Theory", description: "", children: [] },
+  ];
+  const existing = ["Theory", "OldArea/Theory"];
+  const cols = findExistingNameCollisions(tax, existing);
+  assert.equal(cols.length, 2);
+  assert.ok(cols.every((c) => c.taxPath === "NewArea/Theory"));
+  assert.ok(cols.every((c) => c.taxLeafName === "Theory"));
+  const existingReported = cols.map((c) => c.existingPath).sort();
+  assert.deepEqual(existingReported, ["OldArea/Theory", "Theory"]);
+});
+
+test("findExistingNameCollisions: detects collision at root level (top-level reuse of existing top-level name)", () => {
+  // Existing library has top-level "ML"; taxonomy proposes a NEW top-level
+  // "ML" — but since the path matches exactly, this is a reuse, NOT a
+  // collision. (A same-path top-level node is reused.)
+  const tax: TaxonomyNode[] = [
+    { name: "ML", path: "ML", description: "", children: [] },
+  ];
+  assert.deepEqual(findExistingNameCollisions(tax, ["ML"]), []);
 });
 
 // --- extractJson ----------------------------------------------------------

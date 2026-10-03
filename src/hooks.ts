@@ -10,7 +10,11 @@ import {
   summarizeLibrary,
   type LibrarySummary,
 } from "./modules/libraryReader";
-import { initOrganizerUI, openReviewWindow } from "./modules/organizerUI";
+import { openReviewWindow } from "./modules/organizerUI";
+// The review window is initialized directly from openReviewWindow()
+// (organizerUI.ts), which awaits the chrome:// window's load event and then
+// calls initOrganizerUI in the plugin context. There is no onOrganizerLoad
+// hook (the chrome:// scope does not expose Zotero.SmartOrganizer).
 
 const DEBUG_MENU_ID = `${config.addonRef}-read-library`;
 const ORGANIZE_MENU_ID = `${config.addonRef}-organize`;
@@ -24,7 +28,7 @@ async function onStartup() {
 
   initLocale();
 
-  registerPrefs();
+  await registerPrefs();
 
   await Promise.all(Zotero.getMainWindows().map((win) => onMainWindowLoad(win)));
 
@@ -117,25 +121,6 @@ function registerDebugMenu(): void {
 }
 
 /**
- * Called from `addon/content/organizer.xhtml`'s `onload`. Dispatches to the
- * UI controller to populate the tree and wire up the buttons.
- */
-function onOrganizerLoad(win: Window): void {
-  // Belt-and-suspenders: the organizer.xhtml <linkset> already requests the
-  // FTL via an inline <html:link rel="localization">, but register the source
-  // programmatically too so a failure of the inline link does not leave
-  // data-l10n-id attributes unlocalized (blank labels).
-  try {
-    (win as any).MozXULElement.insertFTLIfNeeded(
-      `${addon.data.config.addonRef}-mainWindow.ftl`,
-    );
-  } catch (e) {
-    Zotero.debug(`[SmartOrganizer] insertFTLIfNeeded failed: ${e}`);
-  }
-  initOrganizerUI(win);
-}
-
-/**
  * Run the read-only library reader and report a summary via Zotero.debug and a
  * progress notification. Performs NO writes, NO LLM calls.
  */
@@ -184,5 +169,4 @@ export default {
   onMainWindowLoad,
   onMainWindowUnload,
   onPrefsEvent,
-  onOrganizerLoad,
 };

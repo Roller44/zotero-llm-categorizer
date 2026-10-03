@@ -11,9 +11,14 @@ const REF = config.addonRef;
 
 /**
  * Register the preference pane with Zotero. Called once at startup.
+ *
+ * `Zotero.PreferencePanes.register` is async (preferencePanes.js:134); awaiting
+ * it ensures any rejection (duplicate pane ID, resolveURI failure, etc.) is
+ * surfaced to the caller's try/catch instead of becoming an unhandled
+ * rejection.
  */
-export function registerPrefs(): void {
-  Zotero.PreferencePanes.register({
+export async function registerPrefs(): Promise<void> {
+  await Zotero.PreferencePanes.register({
     pluginID: config.addonID,
     src: rootURI + "content/preferences.xhtml",
     label: getString("prefs-title"),

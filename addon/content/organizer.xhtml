@@ -40,6 +40,17 @@
       </hbox>
     </vbox>
 
+    <!-- Applying overlay: shown while the plan is being applied to the library -->
+    <vbox id="smartorganizer-applying" flex="1" style="padding: 16px; display: none;">
+      <label value="Applying categorization plan…" style="font-size: 16px; font-weight: bold;" />
+      <spacer style="height: 8px;" />
+      <description id="smartorganizer-apply-message" style="font-size: 13px;">Starting…</description>
+      <spacer style="height: 8px;" />
+      <progressmeter id="smartorganizer-apply-bar" mode="determined" value="0" />
+      <spacer style="height: 4px;" />
+      <description id="smartorganizer-apply-detail" style="font-size: 11px; color: #888;" />
+    </vbox>
+
     <!-- Main split: hidden until plan is ready.
          Uses an explicit pixel height instead of flex so the content area
          has a real height regardless of XUL/CSS flex interactions. -->
@@ -65,7 +76,6 @@
         <button id="smartorganizer-revert" label="Revert" disabled="true" />
         <button id="smartorganizer-cancel" label="Cancel" />
       </hbox>
-      <description style="font-size: 11px; color: #999; padding-top: 4px;">Applying will replace all existing collection memberships with the proposed taxonomy. Old collections that become empty will be deleted. You can revert to restore the previous state.</description>
     </vbox>
     <description id="smartorganizer-status" style="padding: 4px 12px 8px; font-size: 12px; color: #666;" />
   </vbox>

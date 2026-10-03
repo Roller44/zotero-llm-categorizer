@@ -84,7 +84,9 @@ async function mapWithConcurrency<I, O>(
           .finally(() => {
             active--;
             if (next < items.length) {
-              launch();
+              // Yield to the UI macrotask queue between batch completions so
+              // the host can process paint/input events for large libraries.
+              setTimeout(launch, 0);
             } else if (active === 0) {
               resolve(results);
             }
@@ -143,7 +145,8 @@ async function classifyBatch(
     if (attempt < MAX_RETRIES) {
       const retry = buildRetryPrompt(lastError);
       messages = [
-        { role: "system", content: retry.system },
+        ...messages,
+        { role: "assistant", content: raw },
         { role: "user", content: retry.user },
       ];
     }

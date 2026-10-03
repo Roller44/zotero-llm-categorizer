@@ -1,7 +1,7 @@
 {
   "name": "zotero-llm-categorizer",
   "type": "module",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Zotero Smart Organizer - LLM-assisted library categorization",
   "config": {
     "addonName": "Zotero Smart Organizer",

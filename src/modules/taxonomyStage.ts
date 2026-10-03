@@ -128,7 +128,8 @@ export async function proposeTaxonomy(
     if (attempt < MAX_RETRIES) {
       const retry = buildRetryPrompt(lastError);
       messages = [
-        { role: "system", content: retry.system },
+        ...messages,
+        { role: "assistant", content: raw },
         { role: "user", content: retry.user },
       ];
     }

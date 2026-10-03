@@ -85,6 +85,14 @@ export const DEFAULT_TAXONOMY_SYSTEM_PROMPT = [
   "- Maximum depth 3 (top-level area / child / grandchild). Do NOT go deeper.",
   "- Names must be concise, research-domain-oriented (e.g. 'SemanticComm',",
   "  'ChannelCoding', 'ResourceAlloc'). No generic names like 'Other'.",
+  "- Each collection PATH must be unique. Two collections may share a leaf",
+  "  name only if they have different parent paths (e.g.",
+  "  'Wireless/MACProtocols' and 'Wired/MACProtocols' are both fine).",
+  "- The existing library may already contain collections whose names you do",
+  "  not see here. Where possible, avoid reusing an existing top-level",
+  "  collection's name as a leaf name under a different parent — that would",
+  "  create two same-named collections with different papers. (Hint only; the",
+  "  authoritative guard lives in the applier.)",
   "- Every paper in the sample must plausibly fit somewhere in the tree.",
   "- Each node's `path` MUST equal its parent's path + '/' + its own name,",
   "  with the root node's path equal to its name (no leading slash).",
@@ -106,6 +114,9 @@ export const DEFAULT_CLASSIFICATION_SYSTEM_PROMPT = [
   "Hard constraints:",
   "- Every path in `collectionPaths` MUST appear verbatim in the provided",
   "  taxonomy path list. Do not invent new paths.",
+  "- Use the FULL slash-delimited path (e.g. 'SemanticComm/JSCC/Analog'),",
+  "  NOT just the leaf name. Two collections may share a leaf name but have",
+  "  different parent paths — always use the complete path.",
   "- Return one assignment object per item in the batch, with the matching",
   "  `itemId`.",
   "- Set `confidence` to 'high' only when the paper clearly belongs; 'medium'",
@@ -225,11 +236,13 @@ export function buildClassificationPrompt(
 }
 
 /**
- * Build the corrective retry prompt sent when an LLM response failed
- * validation. `error` is the validator's human-readable error message.
+ * Build the corrective retry message appended after the LLM's failed response.
+ * `error` is the validator's human-readable error message.
  *
- * The retry prompt is provider-agnostic: it works as a fresh system/user pair
- * (the orchestrator prepends it to a new `chatComplete` call). Pure.
+ * The retry is sent as a follow-up user message in the SAME conversation, so
+ * the LLM retains the original system prompt, the item sample, and its own
+ * previous (invalid) output. This lets it fix the JSON in context rather than
+ * guessing from a bare error string. Pure.
  */
 export function buildRetryPrompt(error: string): {
   system: string;
@@ -241,11 +254,12 @@ export function buildRetryPrompt(error: string): {
     "fences and no prose.",
   ].join("\n");
   const user = [
-    "The validation error was:",
+    "Your previous response could not be used:",
     "",
     error,
     "",
-    "Re-emit the JSON object, corrected. Output JSON and nothing else.",
+    "Re-emit the FULL corrected JSON object now. Output ONLY the JSON, no prose,",
+    "no markdown fences.",
   ].join("\n");
   return { system, user };
 }

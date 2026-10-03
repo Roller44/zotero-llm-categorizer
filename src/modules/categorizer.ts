@@ -49,15 +49,22 @@ export interface ProgressUpdate {
 export async function generatePlan(
   onProgress?: (update: ProgressUpdate) => void,
 ): Promise<CategorizationPlan> {
+  Zotero.debug("[SmartOrganizer] generatePlan: entry");
   onProgress?.({ stage: "reading", message: "Reading library…" });
 
   const items = await readLibrary();
+  Zotero.debug(
+    `[SmartOrganizer] generatePlan: stage 'reading' complete — ${items.length} items`,
+  );
   onProgress?.({
     stage: "reading",
     message: `Read ${items.length} items from library.`,
   });
 
   const sample = sampleForTaxonomy(items);
+  Zotero.debug(
+    `[SmartOrganizer] generatePlan: stage 'taxonomy' — sampling ${sample.length} items for proposal`,
+  );
   onProgress?.({
     stage: "taxonomy",
     message: `Proposing taxonomy from ${sample.length} sampled items…`,
@@ -66,14 +73,29 @@ export async function generatePlan(
 
   // Build the onChunk callback that surfaces LLM reasoning deltas to the
   // progress UI. Content chunks are accumulated internally by chatComplete and
-  // can be ignored here.
+  // can be ignored here. Reasoning deltas are coalesced and only flushed to
+  // onProgress at most every ~80ms so a fast stream can't fan out hundreds of
+  // progress updates per second (which would saturate the UI even when the
+  // DOM-writing path is throttled).
+  let reasoningBuffer = "";
+  let lastReasoningFlush = 0;
+  const REASONING_FLUSH_MS = 80;
+  const flushReasoning = () => {
+    if (reasoningBuffer.length === 0) return;
+    onProgress?.({
+      stage: "reasoning",
+      message: "LLM is reasoning…",
+      detail: reasoningBuffer,
+    });
+    reasoningBuffer = "";
+    lastReasoningFlush = Date.now();
+  };
   const onChunk: ChunkCallback = (kind, text) => {
     if (kind === "reasoning") {
-      onProgress?.({
-        stage: "reasoning",
-        message: "LLM is reasoning…",
-        detail: text,
-      });
+      reasoningBuffer += text;
+      if (Date.now() - lastReasoningFlush >= REASONING_FLUSH_MS) {
+        flushReasoning();
+      }
     }
   };
 
@@ -84,6 +106,11 @@ export async function generatePlan(
       detail: taxDetail,
     });
   }, onChunk);
+  // Flush any trailing reasoning deltas that didn't meet the throttle window.
+  flushReasoning();
+  Zotero.debug(
+    `[SmartOrganizer] generatePlan: stage 'taxonomy' complete — ${taxonomy.length} top-level areas, ${flattenTaxonomyPaths(taxonomy).length} total paths`,
+  );
 
   const allPaths = flattenTaxonomyPaths(taxonomy);
   onProgress?.({
@@ -93,6 +120,9 @@ export async function generatePlan(
   });
 
   const totalBatches = Math.ceil(items.length / DEFAULT_BATCH_SIZE);
+  Zotero.debug(
+    `[SmartOrganizer] generatePlan: stage 'classifying' — ${items.length} items in ${totalBatches} batches`,
+  );
   onProgress?.({
     stage: "classifying",
     message: `Classifying ${items.length} items in ${totalBatches} batches…`,
@@ -114,6 +144,10 @@ export async function generatePlan(
     onChunk,
   });
 
+  Zotero.debug(
+    `[SmartOrganizer] generatePlan: stage 'classifying' complete — ${assignments.filter((a) => a.collectionPaths.length > 0).length}/${items.length} items assigned`,
+  );
+
   onProgress?.({
     stage: "done",
     message: "Plan complete.",
@@ -127,13 +161,18 @@ export async function generatePlan(
       | string
       | undefined) || "(unknown)";
 
-  return {
+  const plan: CategorizationPlan = {
     taxonomy,
     assignments,
     stats,
     model,
     generatedAt: new Date().toISOString(),
   };
+  Zotero.debug(
+    `[SmartOrganizer] generatePlan: exit — ${plan.stats.totalCollections} collections, ` +
+      `${plan.stats.itemsWithAssignment}/${plan.stats.totalItems} items assigned, model=${plan.model}`,
+  );
+  return plan;
 }
 
 /**

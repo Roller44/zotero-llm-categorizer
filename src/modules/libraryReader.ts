@@ -110,7 +110,20 @@ function resolveCollectionPaths(item: Zotero.Item): string[] {
 
   const paths: string[] = [];
   for (const id of collectionIDs) {
-    const path = buildCollectionPath(id, lookup);
+    // Zotero.Collections.get(id) can throw Zotero.Exception.UnloadedDataException
+    // if a collection is registered but not loaded. Skip the unresolvable ID
+    // so a single stale/unloaded membership cannot abort the entire library
+    // read — the remaining IDs for this item (and all other items) still
+    // resolve.
+    let path: string | undefined;
+    try {
+      path = buildCollectionPath(id, lookup);
+    } catch (e) {
+      Zotero.debug(
+        `[SmartOrganizer] resolveCollectionPaths: skipping collection ${id} for item ${item.id}: ${e}`,
+      );
+      continue;
+    }
     if (path) {
       paths.push(path);
     }

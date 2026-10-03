@@ -75,6 +75,7 @@ const USER_LIBRARY_ID = 1;
  * collections in the personal library, recursively.
  */
 export async function captureSnapshot(): Promise<RevertSnapshot> {
+  Zotero.debug("[SmartOrganizer] captureSnapshot: entry");
   const all = (await Zotero.Items.getAll(USER_LIBRARY_ID)) as Zotero.Item[];
 
   const items: ItemMembershipSnapshot[] = [];
@@ -95,11 +96,16 @@ export async function captureSnapshot(): Promise<RevertSnapshot> {
     existingCollections.map((c) => c.id),
   );
 
-  return {
+  const snapshot: RevertSnapshot = {
     items,
     existingCollectionIDs,
     timestamp: new Date().toISOString(),
   };
+  Zotero.debug(
+    `[SmartOrganizer] captureSnapshot: exit — ${items.length} items, ` +
+      `${existingCollectionIDs.size} existing collections`,
+  );
+  return snapshot;
 }
 
 /**
@@ -124,6 +130,9 @@ export async function revertFromSnapshot(
   collectionsDeleted: number;
   errors: { itemId?: number; error: string }[];
 }> {
+  Zotero.debug(
+    `[SmartOrganizer] revertFromSnapshot: entry — ${snapshot.items.length} items`,
+  );
   const errors: { itemId?: number; error: string }[] = [];
   let itemsRestored = 0;
 
@@ -132,6 +141,9 @@ export async function revertFromSnapshot(
       const item = Zotero.Items.get(snap.itemId);
       // Items may have been deleted between snapshot and revert; skip if so.
       if (!item || item.deleted) {
+        Zotero.debug(
+          `[SmartOrganizer] revertFromSnapshot: skipping item ${snap.itemId} (not found or trashed)`,
+        );
         continue;
       }
       // Full replace: set to the recorded IDs. setCollections takes IDs or
@@ -141,6 +153,9 @@ export async function revertFromSnapshot(
       itemsRestored++;
       await delay(REVERT_DELAY_MS);
     } catch (e) {
+      Zotero.debug(
+        `[SmartOrganizer] revertFromSnapshot: error restoring item ${snap.itemId}: ${e}`,
+      );
       errors.push({
         itemId: snap.itemId,
         error: (e as Error).message ?? String(e),
@@ -154,6 +169,9 @@ export async function revertFromSnapshot(
     USER_LIBRARY_ID,
     true,
   ) as Zotero.Collection[];
+  Zotero.debug(
+    `[SmartOrganizer] revertFromSnapshot: ${currentCollections.length} collections now in library; checking for empty created-by-apply collections to delete`,
+  );
   for (const col of currentCollections) {
     // Only delete collections that did NOT exist before apply.
     if (snapshot.existingCollectionIDs.has(col.id)) {
@@ -164,20 +182,29 @@ export async function revertFromSnapshot(
       continue;
     }
     try {
-      // eraseTx() resolves to `true` on success or `false` if not erased
-      // (dataObjects.d.ts:262). Only count the collection as deleted when it
-      // actually was, so the reported count is never inflated.
-      const erased = await col.eraseTx();
-      if (erased) {
-        collectionsDeleted++;
-      }
+      // eraseTx() resolves to `undefined` on success (it calls erase(), which
+      // returns `Zotero.DB.executeTransaction(async fn)` where the async
+      // callback has no explicit return). The catch block handles actual
+      // failures, so on a successful await we always increment.
+      await col.eraseTx();
+      collectionsDeleted++;
+      Zotero.debug(
+        `[SmartOrganizer] revertFromSnapshot: deleted collection ${col.id} (${col.name})`,
+      );
     } catch (e) {
+      Zotero.debug(
+        `[SmartOrganizer] revertFromSnapshot: failed to delete collection ${col.id}: ${e}`,
+      );
       errors.push({
         error: `Failed to delete collection ${col.id}: ${(e as Error).message ?? String(e)}`,
       });
     }
   }
 
+  Zotero.debug(
+    `[SmartOrganizer] revertFromSnapshot: exit — ${itemsRestored} items restored, ` +
+      `${collectionsDeleted} collections deleted, ${errors.length} errors`,
+  );
   return { itemsRestored, collectionsDeleted, errors };
 }
 
