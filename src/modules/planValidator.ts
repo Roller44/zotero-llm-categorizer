@@ -324,12 +324,19 @@ export function validateAssignments(
       };
     }
     const keptPaths: string[] = [];
+    const seenPaths = new Set<string>();
     for (const p of rawPaths) {
       if (typeof p !== "string") {
         continue;
       }
       if (validPaths.has(p)) {
-        keptPaths.push(p);
+        // Deduplicate: if the LLM returns the same valid path twice for one
+        // item, keep only the first occurrence. Duplicates are NOT added to
+        // droppedPaths (that list is for INVALID paths the caller should log).
+        if (!seenPaths.has(p)) {
+          seenPaths.add(p);
+          keptPaths.push(p);
+        }
       } else {
         droppedPaths.push(p);
       }

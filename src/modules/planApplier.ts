@@ -161,13 +161,12 @@ export async function applyPlan(
   }
 
   // Pre-apply guard: detect taxonomy nodes that the create loop would have to
-  // CREATE (their full path is not yet known) whose LEAF name matches an
-  // existing collection at a DIFFERENT path. Creating such a node would
-  // silently produce a second collection with the same name but a different
-  // parent and different papers — exactly the duplicate-name bug. We collect
-  // the full collision list up front (so the review UI can surface all of them
-  // at once) and also use it per-node in the create loop to skip the offending
-  // subtree rather than silently create a same-named sibling.
+  // CREATE (their full path is not yet known) whose leaf name matches an
+  // existing collection under the SAME parent path. Creating such a node would
+  // produce a second collection with the same name and same parent — a true
+  // duplicate. A leaf name under a DIFFERENT parent is a distinct collection
+  // and is NOT flagged (e.g. "Wireless/MACProtocols" and "Wired/MACProtocols"
+  // are both valid).
   const collisions = findLocalNameCollisions(plan.taxonomy, pathToID);
   // Index by taxPath for O(1) lookup in the create loop. Multiple existing
   // paths can share a leaf name; we keep all of them for the UI report but the
@@ -210,18 +209,17 @@ export async function applyPlan(
     });
     let id = pathToID.get(node.path);
     if (id === undefined) {
-      // Collision guard: if this node's leaf name collides with an existing
-      // collection at a different path, refuse to create it. Creating it would
-      // produce a same-named sibling under a different parent — the duplicate-
-      // name bug. Skip this node and its subtree; items assigned under it will
-      // fail to refile in Phase 2 with a clear "could not be resolved" error.
+      // Collision guard: if this node's leaf name under its parent path
+      // collides with an existing collection at the same parent path, refuse
+      // to create it. This would be a true duplicate (same name + same parent).
+      // A leaf name under a different parent is NOT blocked.
       if (collisionByTaxPath.has(node.path)) {
         errors.push({
           itemId: -1,
           error:
-            `Skipped creating collection "${node.path}": its leaf name "` +
-            `${leafNameOf(node.path)}" already exists as a collection at a ` +
-            `different path. Edit the taxonomy to use a unique name.`,
+            `Skipped creating collection "${node.path}": a collection with the ` +
+            `same name "${leafNameOf(node.path)}" already exists under the same ` +
+            `parent. Edit the taxonomy to use a unique name.`,
         });
         // Do NOT set pathToID[node.path], so children and assignments under it
         // also fail to resolve. Skip the subtree entirely.
@@ -542,15 +540,16 @@ function findLocalNameCollisions(
   taxonomy: TaxonomyNode[],
   pathToID: Map<string, number>,
 ): { taxPath: string; taxLeafName: string; existingPath: string }[] {
-  const existingByLeaf = new Map<string, string[]>();
+  // Index existing collections by (parentPath, leafName) so we only flag
+  // a collision when the SAME leaf name appears under the SAME parent —
+  // which would produce a true duplicate (same name + same parent).
+  // A leaf name under a DIFFERENT parent is a distinct collection and
+  // must NOT be flagged as a collision.
+  const existingByParentAndLeaf = new Set<string>();
   for (const p of pathToID.keys()) {
     const leaf = leafNameOf(p);
-    let arr = existingByLeaf.get(leaf);
-    if (!arr) {
-      arr = [];
-      existingByLeaf.set(leaf, arr);
-    }
-    arr.push(p);
+    const parentPath = p.lastIndexOf("/") === -1 ? "" : p.slice(0, p.lastIndexOf("/"));
+    existingByParentAndLeaf.add(`${parentPath}\0${leaf}`);
   }
   const out: { taxPath: string; taxLeafName: string; existingPath: string }[] =
     [];
@@ -561,13 +560,16 @@ function findLocalNameCollisions(
       continue;
     }
     const leaf = leafNameOf(taxPath);
-    const candidates = existingByLeaf.get(leaf);
-    if (!candidates) {
-      continue;
-    }
-    // taxPath is not in pathToID, so every candidate path differs from it.
-    for (const existingPath of candidates) {
-      out.push({ taxPath, taxLeafName: leaf, existingPath });
+    const parentPath = taxPath.lastIndexOf("/") === -1 ? "" : taxPath.slice(0, taxPath.lastIndexOf("/"));
+    // Only flag as collision if the SAME leaf name exists under the SAME parent.
+    // This catches true duplicates (same name + same parent) while allowing
+    // legitimate collections that share a leaf name under different parents.
+    if (existingByParentAndLeaf.has(`${parentPath}\0${leaf}`)) {
+      // Find the actual existing path for the report
+      // (it should be the same as taxPath since parent+leaf match, but
+      // there could be multiple existing collections with the same path
+      // — the twin-collection case handled earlier)
+      out.push({ taxPath, taxLeafName: leaf, existingPath: taxPath });
     }
   }
   return out;
@@ -599,6 +601,13 @@ function buildExistingPath(
       break;
     }
     current = existingByID.get(pid);
+    // If the parent is missing from existingByID, the path is incomplete —
+    // return "" so the caller skips this collection rather than recording a
+    // wrong partial path in pathToID (which could shadow a root-level taxonomy
+    // node with the same leaf name).
+    if (!current && pid) {
+      return "";
+    }
   }
   return names.join("/");
 }

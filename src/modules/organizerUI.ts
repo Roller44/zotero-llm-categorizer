@@ -47,6 +47,8 @@ interface OrganizerWindowState {
   progressText: string;
   /** Whether generation is in progress. */
   generating: boolean;
+  /** Whether an apply is in progress (re-entrancy guard). */
+  applying: boolean;
 }
 
 const state: OrganizerWindowState = {
@@ -57,6 +59,7 @@ const state: OrganizerWindowState = {
   selectedPath: null,
   progressText: "",
   generating: false,
+  applying: false,
 };
 
 /**
@@ -295,11 +298,13 @@ export function initOrganizerUI(win: Window): void {
   state.window = win;
   const doc = win.document;
 
-  // Wire up buttons — use both "command" (XUL standard) and "click" (fallback).
+  // Wire up buttons. Register ONLY 'command' — a XUL <button> fires BOTH
+  // 'command' and 'click' on a single activation, so registering both causes
+  // the handler to run twice per click. 'command' is the XUL standard and
+  // fires for both mouse and keyboard activation.
   const wireBtn = (id: string, handler: () => void) => {
     const btn = doc.getElementById(id);
     btn?.addEventListener("command", handler);
-    btn?.addEventListener("click", handler);
   };
   wireBtn("smartorganizer-apply", () => void onApply(win));
   wireBtn("smartorganizer-revert", () => void onRevert(win));
@@ -528,112 +533,129 @@ function flattenNodes(roots: TaxonomyNode[]): TaxonomyNode[] {
  */
 async function onApply(win: Window): Promise<void> {
   Zotero.debug("[SmartOrganizer] onApply: entry");
+  // Re-entrancy guard: reject concurrent invocations. A XUL <button> fires
+  // both 'command' and 'click', and even with a single listener a fast double-
+  // click can start two applies before the button is disabled. This synchronous
+  // flag prevents a second apply from running alongside the first.
+  if (state.applying) {
+    Zotero.debug(
+      "[SmartOrganizer] onApply: already applying; ignoring re-entrant call",
+    );
+    return;
+  }
   const plan = state.plan;
   if (!plan) {
     Zotero.debug("[SmartOrganizer] onApply: no plan; aborting");
     setStatus(win, "No plan to apply.", "error");
     return;
   }
-
-  // SAFETY: capture snapshot BEFORE any write.
-  setStatus(win, "Capturing pre-apply snapshot…", "busy");
-  Zotero.debug("[SmartOrganizer] onApply: capturing pre-apply snapshot");
-  try {
-    state.snapshot = await captureSnapshot();
-  } catch (e) {
-    Zotero.debug(`[SmartOrganizer] onApply: snapshot FAILED: ${e}`);
-    setStatus(
-      win,
-      `Snapshot failed: ${(e as Error).message ?? String(e)}`,
-      "error",
-    );
-    return;
-  }
-  Zotero.debug("[SmartOrganizer] onApply: snapshot captured");
-
-  // Show the applying overlay with a progress bar.
-  showApplying(win, true);
-  setApplyProgress(win, "Starting apply…", 0, "");
-
-  // Disable the action buttons during apply to prevent re-entrancy.
+  state.applying = true;
+  // Disable buttons SYNCHRONOUSLY before any await — this closes the window
+  // between the start of onApply and the first async yield where the button
+  // would still be enabled.
   setButtonsDisabled(win, true);
-
-  // Accumulate progress in plain variables; a timer flushes to the DOM every
-  // 150ms so the UI updates without starving the async apply loop.
-  let applyMsg = "Starting apply…";
-  let applyPct = 0;
-  let applyDetail = "";
-
-  const timer = win.setInterval(() => {
-    setApplyProgress(win, applyMsg, applyPct, applyDetail);
-  }, 150);
-
-  let result: ApplyResult;
   try {
-    Zotero.debug(
-      `[SmartOrganizer] onApply: calling applyPlan (replaceExisting=true)`,
-    );
-    result = await applyPlan(plan, {
-      replaceExisting: true,
-      onProgress: (u) => {
-        // Map the three phases to overall progress: collections 0-10%,
-        // refiling 10-95%, cleanup 95-100%.
-        if (u.phase === "collections") {
-          applyPct = Math.round((u.current / Math.max(u.total, 1)) * 10);
-          applyMsg = u.message;
-        } else if (u.phase === "refiling") {
-          applyPct = 10 + Math.round((u.current / Math.max(u.total, 1)) * 85);
-          applyMsg = u.message;
-        } else {
-          applyPct = 95;
-          applyMsg = u.message;
-        }
-        applyDetail = "";
-      },
-    });
-    Zotero.debug(
-      `[SmartOrganizer] onApply: applyPlan returned — ${result.collectionsCreated} created, ` +
-        `${result.itemsRefiled} refiled, ${result.collectionsDeleted} deleted, ` +
-        `${result.errors.length} errors, ${result.nameCollisions.length} collisions`,
-    );
-  } catch (e) {
+    // SAFETY: capture snapshot BEFORE any write.
+    setStatus(win, "Capturing pre-apply snapshot…", "busy");
+    Zotero.debug("[SmartOrganizer] onApply: capturing pre-apply snapshot");
+    try {
+      state.snapshot = await captureSnapshot();
+    } catch (e) {
+      Zotero.debug(`[SmartOrganizer] onApply: snapshot FAILED: ${e}`);
+      setStatus(
+        win,
+        `Snapshot failed: ${(e as Error).message ?? String(e)}`,
+        "error",
+      );
+      return;
+    }
+    Zotero.debug("[SmartOrganizer] onApply: snapshot captured");
+
+    // Show the applying overlay with a progress bar.
+    showApplying(win, true);
+    setApplyProgress(win, "Starting apply…", 0, "");
+
+    // Accumulate progress in plain variables; a timer flushes to the DOM every
+    // 150ms so the UI updates without starving the async apply loop.
+    let applyMsg = "Starting apply…";
+    let applyPct = 0;
+    let applyDetail = "";
+
+    const timer = win.setInterval(() => {
+      setApplyProgress(win, applyMsg, applyPct, applyDetail);
+    }, 150);
+
+    let result: ApplyResult;
+    try {
+      Zotero.debug(
+        `[SmartOrganizer] onApply: calling applyPlan (replaceExisting=true)`,
+      );
+      result = await applyPlan(plan, {
+        replaceExisting: true,
+        onProgress: (u) => {
+          // Map the three phases to overall progress: collections 0-10%,
+          // refiling 10-95%, cleanup 95-100%.
+          if (u.phase === "collections") {
+            applyPct = Math.round((u.current / Math.max(u.total, 1)) * 10);
+            applyMsg = u.message;
+          } else if (u.phase === "refiling") {
+            applyPct = 10 + Math.round((u.current / Math.max(u.total, 1)) * 85);
+            applyMsg = u.message;
+          } else {
+            applyPct = 95;
+            applyMsg = u.message;
+          }
+          applyDetail = "";
+        },
+      });
+      Zotero.debug(
+        `[SmartOrganizer] onApply: applyPlan returned — ${result.collectionsCreated} created, ` +
+          `${result.itemsRefiled} refiled, ${result.collectionsDeleted} deleted, ` +
+          `${result.errors.length} errors, ${result.nameCollisions.length} collisions`,
+      );
+    } catch (e) {
+      win.clearInterval(timer);
+      showApplying(win, false);
+      Zotero.debug(`[SmartOrganizer] onApply: applyPlan threw: ${e}`);
+      setStatus(
+        win,
+        `Apply failed: ${(e as Error).message ?? String(e)}`,
+        "error",
+      );
+      return;
+    }
+    state.lastApply = result;
+
+    // Final flush, then hide the overlay.
     win.clearInterval(timer);
+    setApplyProgress(win, "Apply complete!", 100, "");
     showApplying(win, false);
-    setButtonsDisabled(win, false);
-    Zotero.debug(`[SmartOrganizer] onApply: applyPlan threw: ${e}`);
+
+    const errLine =
+      result.errors.length > 0
+        ? ` | ${result.errors.length} errors`
+        : "";
+    const delLine =
+      result.collectionsDeleted > 0
+        ? `, ${result.collectionsDeleted} empty collections deleted`
+        : "";
     setStatus(
       win,
-      `Apply failed: ${(e as Error).message ?? String(e)}`,
-      "error",
+      `Applied: ${result.collectionsCreated} collections created, ` +
+        `${result.itemsRefiled} items refiled${delLine}${errLine}.`,
+      result.errors.length > 0 ? "error" : "success",
     );
-    return;
+
+    // Enable Revert now that a snapshot exists.
+    const revertBtn = win.document.getElementById(
+      "smartorganizer-revert",
+    ) as any;
+    if (revertBtn) revertBtn.disabled = false;
+  } finally {
+    // Re-enable the action buttons and clear the applying flag.
+    setButtonsDisabled(win, false);
+    state.applying = false;
   }
-  state.lastApply = result;
-
-  // Final flush, then hide the overlay.
-  win.clearInterval(timer);
-  setApplyProgress(win, "Apply complete!", 100, "");
-  showApplying(win, false);
-  setButtonsDisabled(win, false);
-
-  const errLine =
-    result.errors.length > 0
-      ? ` | ${result.errors.length} errors`
-      : "";
-  const delLine =
-    result.collectionsDeleted > 0
-      ? `, ${result.collectionsDeleted} empty collections deleted`
-      : "";
-  setStatus(
-    win,
-    `Applied: ${result.collectionsCreated} collections created, ` +
-      `${result.itemsRefiled} items refiled${delLine}${errLine}.`,
-    result.errors.length > 0 ? "error" : "success",
-  );
-
-  // Enable Revert now that a snapshot exists.
-  const revertBtn = win.document.getElementById("smartorganizer-revert") as any;
-  if (revertBtn) revertBtn.disabled = false;
 }
 
 /**

@@ -389,6 +389,26 @@ test("validateAssignments: filters out paths not in validPaths and records them"
   }
 });
 
+test("validateAssignments: deduplicates duplicate valid paths within one assignment", () => {
+  const valid = new Set(["A", "B"]);
+  const json = [
+    {
+      itemId: 1,
+      collectionPaths: ["A", "B", "A", "B", "A"],
+      confidence: "high",
+    },
+  ];
+  const res = validateAssignments(json, valid);
+  assert.equal(res.ok, true);
+  if (res.ok) {
+    // Each valid path appears only once, in first-occurrence order.
+    assert.deepEqual(res.value[0].collectionPaths, ["A", "B"]);
+    // Duplicates of VALID paths are NOT recorded in droppedPaths.
+    assert.deepEqual(res.droppedPaths, []);
+    assert.equal(res.value[0].confidence, "high");
+  }
+});
+
 test("validateAssignments: zero valid paths -> confidence low and empty paths", () => {
   const valid = new Set(["SemanticComm"]);
   const json = {
